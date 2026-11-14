@@ -6,7 +6,7 @@ import {pathToFileURL,fileURLToPath} from 'node:url';
 import {loadConfig} from './config.mjs';
 import {CDP} from './cdp.mjs';
 import {zoomPage} from './page.mjs';
-import {inviteLink, meetingLink, meetingDestination, zoomHome} from './home.mjs';
+import {inviteLink, meetingLink, meetingDestination, autoJoinLink, zoomHome, zoomPrejoin} from './home.mjs';
 let config, configError;
 try {config=await loadConfig();} catch(e) {configError=e;config={};}
 const profile=config.profile;
@@ -75,13 +75,56 @@ async function clipboardMeeting() {
     return meetingLink(stdout);
   } catch { return null; }
 }
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function joinPrejoin(c,link,config,fallback='Opening meeting') {
+  const name=config.displayName||process.env.USER||'';
+  let passcode='';
+  try { passcode=new URL(link).searchParams.get('pwd')||''; } catch {}
+  let attempted=false, clicked=false, sawPrejoin=false, sawAudioPrompt=false, audio='';
+  const deadline=Date.now()+20000;
+  while(Date.now()<deadline) {
+    let result;
+    try {
+      result=await c.evaluate('('+zoomPrejoin.toString()+')('+JSON.stringify(name)+','+JSON.stringify(!!config.displayName)+','+JSON.stringify(passcode)+','+JSON.stringify(attempted)+')',true);
+    } catch(e) {
+      if(c.ws.closed) {
+        const after=await discover().catch(()=>null);
+        if(after?.state==='meeting')return {ok:true,message:'Meeting joined'};
+        throw new Error('The Zoom window closed while joining.');
+      }
+      if(!/context.*destroyed|target navigated|Cannot find context|connection closed|Zoom did not respond/i.test(e.message))throw e;
+      await sleep(300);
+      continue;
+    }
+    if(!result||typeof result!=='object')throw new Error('Zoom did not respond to the join flow.');
+    if(result.audio)audio=result.audio;
+    if(result.state==='meeting')return {ok:true,message:audio==='none'?'Joined without audio':'Meeting joined'};
+    if(result.state==='waiting')return {ok:true,message:'Waiting for the host'};
+    if(result.state==='signin')throw new Error('Sign in to Zoom in the Zoom window, then try again.');
+    if(result.state==='passcode')throw new Error('This meeting needs a passcode. Use a full Zoom invite link.');
+    if(result.state==='name')throw new Error('Zoom needs a display name. Add displayName to the Zoom controls config or enter it in Zoom.');
+    if(result.state==='error')throw new Error(result.message||'Zoom could not join this meeting.');
+    if(result.state==='audio'){attempted=true;await sleep(250);continue;}
+    if(result.state==='joining'){attempted=true;clicked=true;sawPrejoin=true;await sleep(250);continue;}
+    if(result.state==='prejoin'){sawPrejoin=true;await sleep(250);continue;}
+    if(result.state==='audio-prompt'){attempted=true;sawAudioPrompt=true;await sleep(250);continue;}
+    if(result.state==='loading'||result.state==='idle'){await sleep(250);continue;}
+    throw new Error('Zoom returned an unexpected join state.');
+  }
+  if(clicked)return {ok:true,message:'Joining meeting'};
+  if(sawAudioPrompt)return {ok:true,message:'Choose an audio option in Zoom'};
+  if(sawPrejoin)return {ok:true,message:'Open Zoom to finish joining'};
+  return {ok:true,message:fallback};
+}
 async function homeAction(action) {
   let state=await discover();
   if(state.state==='meeting'||state.state==='unknown')throw new Error('A meeting is active or Zoom is still loading. Reopen the menu.');
   // Validate again at click time; clipboard contents never enter status output.
-  const link=action==='join-clipboard'?await clipboardMeeting():action==='join'?meetingDestination(process.argv[4] || ''):null;
+  let link=action==='join-clipboard'?await clipboardMeeting():action==='join'?meetingDestination(process.argv[4] || ''):null;
   if(action==='join'&&!link)throw new Error('Enter a Zoom meeting link or a 9–11 digit meeting ID.');
   if(action==='join-clipboard'&&!link)throw new Error('The clipboard no longer contains a Zoom meeting link.');
+  const autoJoin=config.autoJoin!==false;
+  if(autoJoin)link=autoJoinLink(link,config.displayName||'');
   await showZoom();
   for(let n=0;n<30;n++) {
     state=await discover();
@@ -95,8 +138,31 @@ async function homeAction(action) {
     const current=await c.evaluate('('+zoomPage.toString()+')()');
     if(current.state!=='idle')throw new Error('The meeting changed. Reopen the Zoom menu.');
     if(action==='join-clipboard'||action==='join') {
-      const result=await c.call('Page.navigate',{url:link});
-      if(result.errorText)throw new Error('Zoom could not open the copied meeting link.');
+      await c.call('Page.enable').catch(()=>{});
+      let navigated=false, loaded=false;
+      const onMessage=data=>{
+        try {
+          const event=JSON.parse(data);
+          if(event.method==='Page.frameNavigated'&&event.params.frame.parentId===undefined)navigated=true;
+          if(event.method==='Page.loadEventFired')loaded=true;
+        } catch {}
+      };
+      c.ws.on('message',onMessage);
+      try {
+        const result=await c.call('Page.navigate',{url:link});
+        if(result.errorText)throw new Error(action==='join-clipboard'?'Zoom could not open the copied meeting link.':'Zoom could not open the meeting link.');
+        for(let n=0;n<80&&!loaded;n++)await sleep(100);
+      } finally {c.ws.off('message',onMessage);}
+      if(!navigated) {
+        let href='';
+        try { href=await c.evaluate('location.href'); } catch {}
+        let current=null;
+        try { current=new URL(href); } catch {}
+        const target=new URL(link);
+        if(!current||current.origin!==target.origin||current.pathname!==target.pathname)
+          return {ok:true,message:action==='join-clipboard'?'Opening copied meeting':'Opening meeting'};
+      }
+      if(autoJoin)return await joinPrejoin(c,link,config,action==='join-clipboard'?'Opening copied meeting':'Opening meeting');
       return {ok:true,message:action==='join-clipboard'?'Opening copied meeting':'Opening meeting'};
     }
     // Join error/prejoin pages may remain after an attempt. Start always returns
@@ -125,6 +191,31 @@ async function homeAction(action) {
     return result;
   } finally {c.close();}
 }
+async function zoomWindowAddress(){
+  const {stdout}=await exec('/usr/bin/hyprctl',['clients','-j'],{timeout:2000});
+  const lockPid=(await readlink(profile+'/SingletonLock').catch(()=>'' )).match(/-(\d+)$/)?.[1];
+  for(const client of JSON.parse(stdout)) {
+    try {
+      const argv=(await readFile('/proc/'+client.pid+'/cmdline','utf8')).split('\0');
+      if(!/^0x[0-9a-f]+$/i.test(client.address))continue;
+      if(!argv.includes('--user-data-dir='+profile)&&!(String(client.pid)===lockPid&&argv.join(' ').includes('--user-data-dir='+profile)))continue;
+      return client.address;
+    }catch{}
+  }
+  return null;
+}
+async function focusZoomWindow(){
+  const address=await zoomWindowAddress();
+  if(!address)return false;
+  await exec('/usr/bin/hyprctl',['dispatch','hl.dsp.focus({ window = "address:'+address+'" })'],{timeout:2000});
+  return true;
+}
+async function closeZoomWindow(){
+  const address=await zoomWindowAddress();
+  if(!address)return false;
+  await exec('/usr/bin/hyprctl',['dispatch','hl.dsp.window.close({ window = "address:'+address+'" })'],{timeout:2000});
+  return true;
+}
 async function showZoom(){
   if(config.launcher) {
     await exec(config.launcher[0],config.launcher.slice(1),{timeout:40000,custom:true});
@@ -134,17 +225,7 @@ async function showZoom(){
   if(state.ws) {
     const c=await CDP.connect(state.ws,state.endpoint);
     try {await c.call('Page.bringToFront');}finally{c.close();}
-    const {stdout}=await exec('/usr/bin/hyprctl',['clients','-j'],{timeout:2000});
-    for(const client of JSON.parse(stdout)) {
-      try {
-        const argv=(await readFile('/proc/'+client.pid+'/cmdline','utf8')).split('\0');
-        const lockPid=(await readlink(profile+'/SingletonLock').catch(()=>'' )).match(/-(\d+)$/)?.[1];
-        if(!/^0x[0-9a-f]+$/i.test(client.address))continue;
-        if(!argv.includes('--user-data-dir='+profile)&&!(String(client.pid)===lockPid&&argv.join(' ').includes('--user-data-dir='+profile)))continue;
-        await exec('/usr/bin/hyprctl',['dispatch','hl.dsp.focus({ window = "address:'+client.address+'" })'],{timeout:2000});
-        return;
-      }catch{}
-    }
+    await focusZoomWindow();
     return;
   }
   await mkdir(profile,{recursive:true,mode:0o700});
@@ -153,6 +234,10 @@ async function showZoom(){
     '--remote-debugging-address=127.0.0.1','--remote-debugging-port=0',
     '--user-data-dir='+profile,'--class=zoom-controls-chromium','--new-window','https://app.zoom.us/wc/home'];
   await launchBrowser(config.browser,args);
+  for(let n=0;n<50;n++) {
+    try {if(await focusZoomWindow())break;}catch{}
+    await new Promise(r=>setTimeout(r,100));
+  }
 }
 async function main(){
   if(configError)throw configError;
@@ -174,12 +259,16 @@ async function main(){
     if(result.verifyLeft) {
       for(let n=0;n<40;n++) {
         const after=await discover();
-        if(after.state==='idle'||after.state==='offline'||(after.state==='meeting'&&after.meeting!==state.meeting))return {ok:true,message:'Left the meeting'};
+        if(after.state==='idle'||after.state==='offline'||(after.state==='meeting'&&after.meeting!==state.meeting)) {
+          await closeZoomWindow().catch(()=>{});
+          return {ok:true,message:'Left the meeting'};
+        }
         await new Promise(r=>setTimeout(r,150));
       }
       throw new Error('Zoom has not left the meeting. It may require a host transfer; open Zoom to finish.');
     }
     if(!result.ok) throw new Error('Zoom is no longer in that meeting. Reopen the menu.');
+    if(action==='leave') await closeZoomWindow().catch(()=>{});
     if(result.link){
       const link=inviteLink(result.link);
       if(!link||link.length>8192)throw new Error('Zoom did not provide a valid invite link.');

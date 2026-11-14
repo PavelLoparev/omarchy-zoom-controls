@@ -39,6 +39,11 @@ the signed-in user on its prejoin screen; after joining with microphone and
 camera off, discovery reported `Test Zoom Meeting` in the meeting state. Leave
 then completed successfully and discovery returned idle.
 
+Auto-join now adds `prefer=1`, fills the prejoin name and passcode, clicks Join,
+and chooses computer audio when Zoom asks. `tests/prejoin.test.mjs` covers the
+prejoin controls and `tests/join.test.mjs` covers the CLI join flow against
+synthetic Zoom pages; a live prejoin/auto-join check is still pending.
+
 An earlier isolated headless guest was refused by Zoom's anti-bot check. The
 successful signed-in browser check used the normal Join flow; no anti-bot
 controls were bypassed. Waiting-room admission and host-transfer cases still

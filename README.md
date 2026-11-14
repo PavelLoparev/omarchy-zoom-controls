@@ -14,9 +14,14 @@ The native Zoom desktop application is not supported.
   Join copied meeting when the clipboard contains a supported Zoom link.
 - Live microphone, camera, and sharing labels; keyboard navigation with arrows
   or j/k, Enter to activate, and Escape to dismiss.
-- Leave completes Zoom's confirmation and verifies departure. It never selects
-  End Meeting for All. If Zoom requires a host transfer, finish that in Zoom.
+- Leave completes Zoom's confirmation, verifies departure, and closes the Zoom
+  window. It never selects End Meeting for All. If Zoom requires a host transfer,
+  finish that in Zoom.
 - Sharing opens your normal desktop picker. You choose the content there.
+- Join fills the prejoin name and passcode, clicks Join, and chooses computer
+  audio when Zoom asks. Waiting rooms and host admission stay in Zoom.
+- Join also fills the prejoin name and passcode, clicks Join, and chooses
+  computer audio when Zoom asks. Waiting rooms and host admission stay in Zoom.
 
 ## Install
 
@@ -62,12 +67,18 @@ Optional settings: `~/.config/zoom-controls/config.json` (respects
 {
   "profile": "~/path/to/dedicated-zoom-profile",
   "launcher": ["~/bin/my-zoom-launcher", "show"],
-  "clipboardCommand": ["~/bin/my-persistent-clipboard-helper"]
+  "clipboardCommand": ["~/bin/my-persistent-clipboard-helper"],
+  "autoJoin": true,
+  "displayName": "Ada Lovelace"
 }
 ```
 
-Omit these settings to use the included defaults. `browser` can select a
-Chromium-compatible executable. Commands are argument arrays, never shell code;
+Omit these settings to use the included defaults. `autoJoin` defaults to `true`;
+set it to `false` to keep Zoom's prejoin preview. `displayName` is optional. It
+is used in the prejoin and sent as Zoom's `un` parameter; when omitted, the
+signed-in account name is kept, with the local user name only as a fallback for
+an empty prejoin field. `browser` can select a Chromium-compatible executable.
+Commands are argument arrays, never shell code;
 `~` is expanded at the start of paths. Bare executable names resolve only in
 `/usr/bin`; use an absolute path for a custom user script. Executables and their
 parent directories must be owned by root or, for explicit overrides, your user,
@@ -107,11 +118,12 @@ as soon as the clipboard service reads it. Link bytes are sent on stdin, not
 placed in service command arguments.
 Your desktop clipboard history may retain copied links under its own settings.
 
-Zoom UI changes can require selector updates. Waiting rooms, sign-in, meeting
-passcodes, host transfer, and other Zoom prompts remain in Zoom. "Opening
-meeting" means navigation began, not that admission to the meeting succeeded.
-Meeting IDs must contain 9–11 digits. Supported links are HTTPS `zoom.us` links
-using `/j/ID`, `/wc/join/ID`, or `/my/name`.
+Zoom UI changes can require selector updates. Join fills the prejoin name and
+passcode, clicks Join, and chooses computer audio when Zoom asks; waiting rooms,
+sign-in, host admission, host transfer, and other prompts remain in Zoom. If the
+prejoin controls are not recognized, the Zoom window is left at the preview for
+manual join. Meeting IDs must contain 9–11 digits. Supported links are HTTPS
+`zoom.us` links using `/j/ID`, `/wc/join/ID`, or `/my/name`.
 
 ## Execution limits
 
@@ -147,6 +159,10 @@ IPC:
 omarchy-shell zoom-controls status
 omarchy-shell zoom-controls actions
 omarchy-shell zoom-controls toggle
+omarchy-shell zoom-controls toggleMute
+omarchy-shell zoom-controls toggleCamera
+omarchy-shell zoom-controls toggleShare
+omarchy-shell zoom-controls leaveMeeting
 ```
 
 `actions` reports rows loaded by the running menu, useful for verifying updates.

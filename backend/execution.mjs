@@ -27,5 +27,10 @@ export function exec(command, args=[], {timeout=2000,maxBuffer=65536,custom=fals
 export async function launchBrowser(browser,args) {
   // Resolve the explicitly configured browser before uwsm receives its argv.
   const {stdout}=await exec('/usr/bin/python3',['-I',runner,'resolve',browser],{timeout:2000});
-  await exec('/usr/bin/uwsm-app',['--',JSON.parse(stdout),...args],{timeout:10000});
+  // uwsm-app execs `systemd-run --scope`, which blocks until the app exits.
+  // Detach it so the browser outlives the supervised launcher and its
+  // process-group cleanup (Omarchy launches GUIs with `setsid uwsm-app ... &`).
+  const p=spawn('/usr/bin/uwsm-app',['--',JSON.parse(stdout),...args],{env:childEnvironment,stdio:'ignore',detached:true});
+  p.on('error',()=>{});
+  p.unref();
 }

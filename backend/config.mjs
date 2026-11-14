@@ -16,7 +16,11 @@ export function parseConfig(value = {}, env = process.env) {
   if (!path.isAbsolute(profile)) throw new Error('profile must be an absolute path.');
   const browser = value.browser || 'chromium';
   if (typeof browser !== 'string' || !browser || browser.includes('\0')) throw new Error('browser must name an executable.');
-  return {profile:path.resolve(profile), browser:expand(browser), launcher:command('launcher'), clipboardCommand:command('clipboardCommand')};
+  const autoJoin = value.autoJoin === undefined || value.autoJoin === null ? true : value.autoJoin;
+  if (typeof autoJoin !== 'boolean') throw new Error('autoJoin must be true or false.');
+  const displayName = value.displayName?.trim?.() ?? '';
+  if (value.displayName !== undefined && value.displayName !== null && (typeof value.displayName !== 'string' || !displayName || displayName.length > 64 || displayName.includes('\0'))) throw new Error('displayName must be a nonempty string up to 64 characters.');
+  return {profile:path.resolve(profile), browser:expand(browser), launcher:command('launcher'), clipboardCommand:command('clipboardCommand'), autoJoin, displayName};
 }
 export async function loadConfig(env = process.env) {
   const file = env.ZOOM_CONTROLS_CONFIG || path.join(env.XDG_CONFIG_HOME || path.join(env.HOME || homedir(), '.config'), 'zoom-controls/config.json');

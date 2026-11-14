@@ -1,5 +1,5 @@
 import {strict as assert} from 'node:assert';
-import {inviteLink, meetingLink, meetingDestination} from '../backend/home.mjs';
+import {inviteLink, meetingLink, meetingDestination, autoJoinLink} from '../backend/home.mjs';
 for (const invite of [
   'https://us02web.zoom.us/j/12345678901?pwd=a%2Bb%2fc.1&from=calendar',
   'https://company.zoom.us/j/123456789?pwd=opaque-token.1',
@@ -12,6 +12,10 @@ assert.equal(meetingLink(' https://app.zoom.us/wc/join/123456789 '), 'https://ap
 assert.equal(meetingLink('https://zoom.us/my/example.name'), 'https://zoom.us/my/example.name');
 assert.equal(meetingDestination('123 456 7890'), 'https://app.zoom.us/wc/join/1234567890');
 assert.equal(meetingDestination('123-456-789'), 'https://app.zoom.us/wc/join/123456789');
+assert.equal(autoJoinLink('https://app.zoom.us/wc/join/123456789?pwd=a%2Bb','Ada Lovelace'), 'https://app.zoom.us/wc/join/123456789?pwd=a%2Bb&prefer=1&un=QWRhIExvdmVsYWNl');
+assert.equal(autoJoinLink('https://app.zoom.us/wc/join/123456789',''), 'https://app.zoom.us/wc/join/123456789?prefer=1');
+assert.equal(autoJoinLink('https://app.zoom.us/wc/join/123456789?prefer=0','Ada'), 'https://app.zoom.us/wc/join/123456789?prefer=1&un=QWRh');
+assert.equal(autoJoinLink(null,'Ada'), null);
 for (const invalid of ['https://zoom.us.evil.test/j/123456789', 'https://evilzoom.us/j/123456789', 'https://evil.test/zoom.us/j/123456789', 'https://user:secret@zoom.us/j/123456789', 'https://zoom.us:1234/j/123456789', 'http://zoom.us/j/123456789', 'javascript:alert(1)', 'https://zoom.us/account', '123456789', 'https://zoom.us/j/123', 'https://zoom.us/j/123456789012', 'Zoom invite: https://zoom.us/j/123456789', '', null, 'x'.repeat(5000)]) {
   assert.equal(meetingLink(invalid), null, String(invalid).slice(0,80));
   assert.equal(inviteLink(invalid), null, String(invalid).slice(0,80));
