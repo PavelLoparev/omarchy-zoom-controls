@@ -7,6 +7,7 @@ import {loadConfig} from './config.mjs';
 import {CDP} from './cdp.mjs';
 import {zoomPage} from './page.mjs';
 import {inviteLink, meetingLink, meetingDestination, autoJoinLink, zoomHome, zoomPrejoin} from './home.mjs';
+import {activeWorkspaceName, focusWorkspaceDispatch} from './workspace.mjs';
 let config, configError;
 try {config=await loadConfig();} catch(e) {configError=e;config={};}
 const profile=config.profile;
@@ -76,6 +77,21 @@ async function clipboardMeeting() {
   } catch { return null; }
 }
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+export async function currentWorkspace(run=exec) {
+  let activeWindow=null;
+  try {activeWindow=JSON.parse((await run('/usr/bin/hyprctl',['activewindow','-j'],{timeout:2000})).stdout);} catch {}
+  const windowName=activeWorkspaceName(activeWindow,null);
+  if(windowName)return windowName;
+  try {
+    const monitors=JSON.parse((await run('/usr/bin/hyprctl',['monitors','-j'],{timeout:2000})).stdout);
+    return activeWorkspaceName(null,monitors);
+  } catch {return '';}
+}
+export async function focusWorkspace(name,run=exec) {
+  const dispatch=focusWorkspaceDispatch(name);
+  if(!dispatch)throw new Error('Invalid workspace to return to.');
+  await run('/usr/bin/hyprctl',['dispatch',dispatch],{timeout:2000});
+}
 async function joinPrejoin(c,link,config,fallback='Opening meeting') {
   const name=config.displayName||process.env.USER||'';
   let passcode='';
@@ -241,13 +257,18 @@ async function showZoom(){
 }
 async function main(){
   if(configError)throw configError;
+  if(action==='focus-workspace'){await focusWorkspace(process.argv[4]||'');return {ok:true}}
   if(action==='show'){await showZoom();return {ok:true}}
   if(['start','join','join-clipboard'].includes(action))return homeAction(action);
   const state=await discover();
   const token=state.target&&state.meeting?JSON.stringify([state.target,state.meeting]):'';
   if(action==='status') {const {ws,endpoint,meeting,target,...publicState}=state;return {...publicState,clipboardMeeting:['idle','offline'].includes(state.state)?!!await clipboardMeeting():false,token,checkedAt:Date.now()}}
   if(state.state!=='meeting'||!token||token!==expected)throw new Error('The meeting changed or is unavailable. Reopen the Zoom menu.');
-  if(['share','chat','participants'].includes(action))await showZoom();
+  let returnWorkspace='';
+  if(['share','chat','participants'].includes(action)) {
+    if(action==='share')returnWorkspace=await currentWorkspace();
+    await showZoom();
+  }
   const c=await CDP.connect(state.ws,state.endpoint);
   try{
     let result;
@@ -276,7 +297,7 @@ async function main(){
       await exec(cmd[0],cmd.slice(1),{timeout:10000,maxBuffer:8192,custom:true,input:link});
       return {ok:true,message:'Invite link copied'};
     }
-    return {...result,message:action==='share'?'Choose what to share in Zoom':''};
+    return {...result,workspace:action==='share'?returnWorkspace:'',message:action==='share'?'Choose what to share in Zoom':''};
   }finally{c.close()}
 }
 if(process.argv[1] && pathToFileURL(process.argv[1]).href===import.meta.url) {
