@@ -2,10 +2,12 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui as Ui
 import "MenuModel.js" as Model
+import "WindowPreview.js" as Preview
 
 Ui.Panel {
   id: root
@@ -32,6 +34,12 @@ Ui.Panel {
   property string runningAction: ""
   property int returnRetries: 0
   readonly property bool inMeeting: meetingState.state === "meeting"
+  property var zoomToplevel: null
+  function updateZoomToplevel() {
+    root.zoomToplevel = root.inMeeting
+      ? Preview.findZoomToplevel(Hyprland.toplevels.values, Preview.ZOOM_CLASS)
+      : null
+  }
   readonly property real liveDot: Style.space(5)
   readonly property real liveWidth: Style.bar.iconFont * 2 + Style.spacing.lg + Style.spacing.xxs + (meetingState.sharing ? Style.spacing.lg + liveDot : 0)
   readonly property string helper: decodeURIComponent(Qt.resolvedUrl("bin/zoom-controls").toString().replace(/^file:\/\//, ""))
@@ -98,13 +106,20 @@ Ui.Panel {
     if (s.state !== "meeting" || !s.capabilities || !s.capabilities.leave) return
     root.act("leave")
   }
-  Component.onCompleted: refresh()
+  Component.onCompleted: { refresh(); updateZoomToplevel() }
   onOpenedChanged: if (!opened) menu.resetJoin(); else if (opened) { refresh(); menu.cursor = -1; Qt.callLater(function() { keys.forceActiveFocus() }) }
-  onMeetingStateChanged: if (root.pendingReturnWorkspace !== "" && root.meetingState.sharing) root.returnToWorkspace()
+  onMeetingStateChanged: {
+    updateZoomToplevel()
+    if (root.pendingReturnWorkspace !== "" && root.meetingState.sharing) root.returnToWorkspace()
+  }
   Timer { interval: root.opened ? 1000 : 2500; running: true; repeat: true; onTriggered: root.refresh() }
   Timer { id: returnPoll; interval: 100; repeat: true; running: root.pendingReturnWorkspace !== ""; onTriggered: root.refresh() }
   Timer { id: returnTimeout; interval: 60000; onTriggered: root.clearReturnWorkspace() }
   Timer { id: returnRetry; interval: 1000; onTriggered: root.returnToWorkspace() }
+  Connections {
+    target: Hyprland.toplevels
+    function onValuesChanged() { root.updateZoomToplevel() }
+  }
   Process {
     id: poll
     clearEnvironment: true
@@ -230,7 +245,7 @@ Ui.Panel {
     open: root.opened
     focusTarget: keys
     contentWidth: popup.fittedContentWidth(Style.space(310))
-    contentHeight: popup.fittedContentHeight(menu.implicitHeight, Style.space(620))
+    contentHeight: popup.fittedContentHeight(content.implicitHeight, Style.space(620))
     Ui.PanelKeyCatcher {
       id: keys
       anchors.fill: parent
@@ -242,18 +257,28 @@ Ui.Panel {
       Flickable {
         anchors.fill: parent
         contentWidth: width
-        contentHeight: menu.implicitHeight
+        contentHeight: content.implicitHeight
         clip: true
         interactive: contentHeight > height
-        MenuContent {
-          id: menu
+        Column {
+          id: content
           width: parent.width
-          meetingState: root.meetingState
-          busy: actionProcess.running
-          feedback: root.feedback
-          feedbackError: root.feedbackError
-          onActionRequested: function(action, value) { root.act(action, value) }
-          onEditingFinished: keys.forceActiveFocus()
+          spacing: Style.space(12)
+          WindowPreview {
+            width: parent.width
+            toplevel: root.zoomToplevel
+            live: root.opened
+          }
+          MenuContent {
+            id: menu
+            width: parent.width
+            meetingState: root.meetingState
+            busy: actionProcess.running
+            feedback: root.feedback
+            feedbackError: root.feedbackError
+            onActionRequested: function(action, value) { root.act(action, value) }
+            onEditingFinished: keys.forceActiveFocus()
+          }
         }
       }
     }
