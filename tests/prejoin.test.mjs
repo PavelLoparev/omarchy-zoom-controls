@@ -44,8 +44,8 @@ try {
   const run=(name='',override=false,passcode='',attempted=false)=>c.evaluate('('+zoomPrejoin.toString()+')('+JSON.stringify(name)+','+JSON.stringify(override)+','+JSON.stringify(passcode)+','+JSON.stringify(attempted)+')',true);
   let r=await run('Ada Lovelace',true,'secret',false);
   assert.equal(r.state,'joining');
-  let frame=await c.evaluate(`(() => { const d=document.querySelector('#webclient').contentDocument; return {name:d.querySelector('#input-for-name').value,pwd:d.querySelector('#input-for-pwd').value,clicked:d.documentElement.dataset.zoomControlsJoinAttempted}; })()`);
-  assert.equal(frame.name,'Ada Lovelace');assert.equal(frame.pwd,'secret');assert.equal(frame.clicked,'1');
+  let frame=await c.evaluate(`(() => { const d=document.querySelector('#webclient').contentDocument; return {name:d.querySelector('#input-for-name').value,pwd:d.querySelector('#input-for-pwd').value,clickedAt:d.documentElement.dataset.zoomControlsJoinAttemptedAt}; })()`);
+  assert.equal(frame.name,'Ada Lovelace');assert.equal(frame.pwd,'secret');assert.match(frame.clickedAt,/^\d+$/);
   r=await run('Ada Lovelace',true,'secret',true);
   assert.equal(r.state,'audio');assert.equal(r.audio,'computer');
   r=await run('Ada Lovelace',true,'secret',true);
@@ -70,5 +70,32 @@ try {
   await c.evaluate(`(() => { const d=document.querySelector('#webclient').contentDocument; d.body.innerHTML='<div>Waiting for the host to start this meeting</div>'; })()`);
   r=await run('Ada',false,'',true);
   assert.equal(r.state,'waiting');
-  console.log('PASS: prejoin name/passcode fill, Join click, audio prompt, meeting audio, passcode/name errors, account name preserved, join error and waiting room');
+  await c.evaluate(`(() => {
+    const d=document.querySelector('#webclient').contentDocument;
+    delete d.documentElement.dataset.zoomControlsJoinAttempted;
+    delete d.documentElement.dataset.zoomControlsJoinAttemptedAt;
+    d.body.innerHTML='<input id="input-for-name" placeholder="Your Name"><button id="join">Join</button>';
+    window.zoomJoinClicks=0;
+    d.querySelector('#join').onclick=()=>{
+      window.zoomJoinClicks++;
+      if(window.zoomJoinClicks<2)return;
+      const a=document.createElement('div');a.className='join-dialog';
+      a.innerHTML='<button id="audio">Join with Computer Audio</button>';
+      a.querySelector('#audio').onclick=()=>{d.body.innerHTML='<footer id="wc-footer"><button id="meeting-info-indication">Test meeting</button></footer>'};
+      d.body.appendChild(a);
+    };
+  })()`);
+  r=await run('Ada',false,'',false);
+  assert.equal(r.state,'joining');
+  assert.equal(await c.evaluate(`window.zoomJoinClicks`),1,'First Join click is attempted');
+  r=await run('Ada',false,'',false);
+  assert.equal(r.state,'joining');
+  assert.equal(await c.evaluate(`window.zoomJoinClicks`),1,'Join is not re-clicked during the cooldown');
+  await c.evaluate(`(() => { const d=document.querySelector('#webclient').contentDocument; d.documentElement.dataset.zoomControlsJoinAttemptedAt=String(Date.now()-2000); })()`);
+  r=await run('Ada',false,'',false);
+  assert.equal(r.state,'joining');
+  assert.equal(await c.evaluate(`window.zoomJoinClicks`),2,'Join is retried after the cooldown');
+  r=await run('Ada',false,'',false);
+  assert.equal(r.state,'audio');
+  console.log('PASS: prejoin name/passcode fill, Join click retry after a swallowed click, audio prompt, meeting audio, passcode/name errors, account name preserved, join error and waiting room');
 } finally {c?.close();const exited=once(browser,'exit');browser.kill();await exited;await rm(tmp,{recursive:true,force:true,maxRetries:5,retryDelay:100})}

@@ -136,10 +136,12 @@ export async function zoomPrejoin(name = '', overrideName = false, passcode = ''
     setValue(nameInput, name);
   }
   if (!join || !visible(join) || !enabled(join)) return {state:'prejoin'};
-  if (prejoin.documentElement.dataset.zoomControlsJoinAttempted === '1') return {state:'joining'};
-  prejoin.documentElement.dataset.zoomControlsJoinAttempted = '1';
+  // A swallowed click must not block every later attempt for this document.
+  const attemptedAt = Number(prejoin.documentElement.dataset.zoomControlsJoinAttemptedAt || '0');
+  if (attemptedAt && Date.now() - attemptedAt < 1500) return {state:'joining'};
+  prejoin.documentElement.dataset.zoomControlsJoinAttemptedAt = String(Date.now());
   if (!click(join)) {
-    delete prejoin.documentElement.dataset.zoomControlsJoinAttempted;
+    delete prejoin.documentElement.dataset.zoomControlsJoinAttemptedAt;
     return {state:'prejoin'};
   }
   return {state:'joining'};
