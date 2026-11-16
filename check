@@ -9,6 +9,7 @@ node tests/workspace.test.mjs
 node tests/window-preview.test.mjs
 node tests/runtime.test.mjs
 node tests/home.test.mjs
+node tests/auth.test.mjs
 node tests/page.test.mjs
 node tests/prejoin.test.mjs
 node tests/join.test.mjs

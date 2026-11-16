@@ -31,7 +31,7 @@ try {
     const url=event.params.request.url;
     requested.push(url);
     const body=url==='https://app.zoom.us/wc/home'?signedOutHtml:'<!doctype html><title>blocked</title>';
-    c.call('Fetch.fulfillRequest',{requestId:event.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'text/html'}],body:Buffer.from(body).toString('base64')});
+    c.call('Fetch.fulfillRequest',{requestId:event.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'text/html'}],body:Buffer.from(body).toString('base64')}).catch(()=>{});
   });
   await c.call('Fetch.enable',{patterns:[{urlPattern:'*'}]});
   await c.call('Page.navigate',{url:'https://app.zoom.us/wc/home'});
@@ -41,13 +41,25 @@ try {
   }
   const result=await run('join','','123456789');
   assert.equal(result.ok,false);
+  assert.equal(result.state,'unknown');
+  assert.deepEqual(result.capabilities,{});
   assert.equal(result.error,'Sign in to Zoom in the Zoom window, then click Join again.');
   assert.equal(requested.some(u=>u.startsWith('https://app.zoom.us/wc/join/')),false,'The join link is never requested while signed out');
-  assert.equal(requested.includes('https://app.zoom.us/wc/home'),true,'The signed-out path checked the Zoom home page');
   await c.evaluate(`document.body.innerHTML=''`);
   const loading=await run('join','','123456789');
   assert.equal(loading.ok,false);
   assert.equal(loading.error,'Zoom is still loading. Open Zoom, sign in, then click Join again.');
   assert.equal(requested.some(u=>u.startsWith('https://app.zoom.us/wc/join/')),false,'The join link is never requested while the home page is loading');
+  await c.call('Page.navigate',{url:'https://app.zoom.us/wc/signin'});
+  for(let n=0;n<60;n++){
+    if(await c.evaluate(`document.readyState==='complete'`))break;
+    await new Promise(r=>setTimeout(r,50));
+  }
+  const homeCount=requested.filter(u=>u==='https://app.zoom.us/wc/home').length;
+  const offHome=await run('join','','123456789');
+  assert.equal(offHome.ok,false);
+  assert.equal(offHome.error,'Sign in to Zoom in the Zoom window, then click Join again.');
+  assert.equal(requested.filter(u=>u==='https://app.zoom.us/wc/home').length,homeCount+1,'The signed-out path navigated to the Zoom home page exactly once');
+  assert.equal(requested.some(u=>u.startsWith('https://app.zoom.us/wc/join/')),false,'The join link is never requested from a non-home page');
   console.log('PASS: CLI join refuses to guest-join a signed-out profile and never opens the join link');
 } finally {c?.close();const exited=once(browser,'exit');browser.kill();await exited;await rm(tmp,{recursive:true,force:true,maxRetries:5,retryDelay:100})}

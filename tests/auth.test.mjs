@@ -20,5 +20,6 @@ try {
   assert.deepEqual(await run('<button aria-label="New meeting">New meeting</button>'),{state:'signed-in'});
   assert.deepEqual(await run('<a href="#">Sign In</a><button aria-label="New meeting">New meeting</button>'),{state:'signed-out'});
   assert.deepEqual(await run('<button aria-label="New meeting" style="display:none">New meeting</button>'),{state:'loading'});
+  assert.deepEqual(await run('<button aria-label="Sign In" style="display:none">Sign In</button>'),{state:'loading'});
   console.log('PASS: zoomAuth distinguishes signed-in, signed-out, loading and ignores hidden controls');
 } finally {c?.close();const exited=once(browser,'exit');browser.kill();await exited;await rm(tmp,{recursive:true,force:true,maxRetries:5,retryDelay:100})}

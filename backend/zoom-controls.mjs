@@ -154,13 +154,20 @@ async function homeAction(action) {
     const current=await c.evaluate('('+zoomPage.toString()+')()');
     if(current.state!=='idle')throw new Error('The meeting changed. Reopen the Zoom menu.');
     if(action==='join-clipboard'||action==='join') {
-      let auth='loading';
-      if(!await c.evaluate("location.hostname==='app.zoom.us' && location.pathname==='/wc/home'")) {
+      let auth='loading', last='', stable=0;
+      let atHome=false;
+      try { atHome=await c.evaluate("location.hostname==='app.zoom.us' && location.pathname==='/wc/home'"); } catch {}
+      if(!atHome) {
         await c.call('Page.navigate',{url:'https://app.zoom.us/wc/home'});
       }
-      for(let n=0;n<60&&auth==='loading';n++) {
+      for(let n=0;n<60;n++) {
         await sleep(100);
-        try { auth=(await c.evaluate('('+zoomAuth.toString()+')()'))?.state||'loading'; } catch {}
+        let seen='loading';
+        try { seen=(await c.evaluate('('+zoomAuth.toString()+')()'))?.state||'loading'; } catch {}
+        if(seen==='loading') {last='';stable=0;continue;}
+        stable=seen===last?stable+1:1;
+        last=seen;
+        if(stable>=2) {auth=seen;break;}
       }
       if(auth!=='signed-in') {
         await focusZoomWindow().catch(()=>{});
