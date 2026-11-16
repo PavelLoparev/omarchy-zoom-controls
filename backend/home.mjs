@@ -39,6 +39,18 @@ export function autoJoinLink(link, displayName = '') {
   return u.href;
 }
 
+// Runs only in the selected Zoom page. The signed-out web home exposes a
+// Sign In control and the signed-in home exposes New meeting; never reads
+// cookies, storage, or tokens.
+export function zoomAuth() {
+  const visible = e => !!e && e.checkVisibility() && e.getClientRects().length > 0;
+  const label = e => (e.getAttribute('aria-label') || e.innerText || '').trim().toLowerCase();
+  const controls = [...document.querySelectorAll('button,a')].filter(visible);
+  if (controls.some(e => label(e) === 'sign in')) return {state: 'signed-out'};
+  if (controls.some(e => label(e) === 'new meeting')) return {state: 'signed-in'};
+  return {state: 'loading'};
+}
+
 // Runs only in the selected Zoom page. Fill the prejoin fields and click Join;
 // the caller polls because Join can replace the document and its context.
 export async function zoomPrejoin(name = '', overrideName = false, passcode = '', attempted = false) {
