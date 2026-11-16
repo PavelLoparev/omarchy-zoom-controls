@@ -6,7 +6,7 @@ import {pathToFileURL,fileURLToPath} from 'node:url';
 import {loadConfig} from './config.mjs';
 import {CDP} from './cdp.mjs';
 import {zoomPage} from './page.mjs';
-import {inviteLink, meetingLink, meetingDestination, autoJoinLink, zoomHome, zoomPrejoin} from './home.mjs';
+import {inviteLink, meetingLink, meetingDestination, autoJoinLink, zoomAuth, zoomHome, zoomPrejoin} from './home.mjs';
 import {activeWorkspaceName, focusWorkspaceDispatch} from './workspace.mjs';
 let config, configError;
 try {config=await loadConfig();} catch(e) {configError=e;config={};}
@@ -154,6 +154,20 @@ async function homeAction(action) {
     const current=await c.evaluate('('+zoomPage.toString()+')()');
     if(current.state!=='idle')throw new Error('The meeting changed. Reopen the Zoom menu.');
     if(action==='join-clipboard'||action==='join') {
+      let auth='loading';
+      if(!await c.evaluate("location.hostname==='app.zoom.us' && location.pathname==='/wc/home'")) {
+        await c.call('Page.navigate',{url:'https://app.zoom.us/wc/home'});
+      }
+      for(let n=0;n<60&&auth==='loading';n++) {
+        await sleep(100);
+        try { auth=(await c.evaluate('('+zoomAuth.toString()+')()'))?.state||'loading'; } catch {}
+      }
+      if(auth!=='signed-in') {
+        await focusZoomWindow().catch(()=>{});
+        throw new Error(auth==='signed-out'
+          ? 'Sign in to Zoom in the Zoom window, then click Join again.'
+          : 'Zoom is still loading. Open Zoom, sign in, then click Join again.');
+      }
       await c.call('Page.enable').catch(()=>{});
       let navigated=false, loaded=false;
       const onMessage=data=>{

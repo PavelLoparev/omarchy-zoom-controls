@@ -53,6 +53,9 @@ no preferences or browser profiles are rewritten. When
 updating, Omarchy can retain old QML code; run `omarchy restart shell` if needed.
 Open the camera icon and choose **Open Zoom**, then sign in once.
 
+Join and Join copied meeting require a signed-in Zoom profile. If you are
+signed out, the widget opens Zoom and asks you to sign in before you retry.
+
 The default launcher uses a dedicated profile at
 `~/.local/share/zoom-controls/chromium` (respects `XDG_DATA_HOME`). Normal browser
 profiles are unaffected. The helper lives inside the plugin; no global helper
